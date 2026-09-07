@@ -14,7 +14,7 @@ from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..database import get_session_maker
+from ..database import tenant_session
 from ..models import (
     Workflow, WorkflowStatus, WorkflowTriggerType,
     WhatsAppContact, WhatsAppMessage, WhatsAppMessageDirection
@@ -192,8 +192,7 @@ class WhatsAppWorkflowTrigger:
         Checks for matching workflows and triggers them.
         Includes real estate intent detection.
         """
-        session_maker = get_session_maker()
-        async with session_maker() as db:
+        async with tenant_session(user_id) as db:
             try:
                 # Detect real estate intent from message
                 re_intent = cls._detect_real_estate_intent(message.content)
@@ -540,8 +539,7 @@ async def execute_whatsapp_action(
     from ..config import settings
     from ..models import Connection
     
-    session_maker = get_session_maker()
-    async with session_maker() as db:
+    async with tenant_session(user_id) as db:
         with trace_span(f"action_{action_name}", payload={"parameters": parameters}):
             try:
                     # Get user's WhatsApp connection config
