@@ -39,14 +39,22 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_data)
 
 # Global queue for async DB logging
-log_queue = asyncio.Queue()
+_log_queue: Optional[asyncio.Queue] = None
+
+def get_log_queue() -> asyncio.Queue:
+    global _log_queue
+    if _log_queue is None:
+        # Create queue on first access, binding to the current active event loop
+        _log_queue = asyncio.Queue()
+    return _log_queue
 
 async def flush_all_logs_async():
     """Flush all currently queued logs to the database immediately."""
     from ..database import get_session_maker
     from ..models import ObservabilityLog
     
-    if log_queue.empty():
+    q = get_log_queue()
+    if q.empty():
         return 0
         
     session_maker = get_session_maker()
@@ -55,7 +63,7 @@ async def flush_all_logs_async():
     # Try to get logs quickly (up to 100 or until queue empty)
     for _ in range(100):
         try:
-            logs_to_persist.append(log_queue.get_nowait())
+            logs_to_persist.append(q.get_nowait())
         except asyncio.QueueEmpty:
             break
             
@@ -91,7 +99,7 @@ async def flush_all_logs_async():
             
         # Mark tasks as done
         for _ in range(len(logs_to_persist)):
-            log_queue.task_done()
+            q.task_done()
             
         return len(logs_to_persist)
         
@@ -103,7 +111,8 @@ async def db_log_worker():
     """Background worker to persist logs from queue to database (FastAPI only)."""
     while True:
         # Avoid race condition by just peeking/sleeping, then flushing
-        if log_queue.empty():
+        q = get_log_queue()
+        if q.empty():
             await asyncio.sleep(0.5)
             continue
             
@@ -207,7 +216,7 @@ def log_event(
         # Non-blocking add to queue
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            log_queue.put_nowait(db_data)
+            get_log_queue().put_nowait(db_data)
     except Exception:
         # If no loop or queue full, we still have stdout log
         pass
